@@ -9,6 +9,7 @@
 #define ABSTRACTCLOUDCRYPTO_HPP_
 
 #include <string>
+#include <exception>
 using namespace std;
 
 #include <boost/filesystem/path.hpp>
@@ -22,25 +23,42 @@ using namespace CryptoPP;
 
 typedef unsigned char byte;
 
+class CloudCryptoException: public std::exception {
+public:
+	CloudCryptoException(const char *message) :
+			message(message) {
+	}
+
+	~CloudCryptoException() {
+	}
+
+	const char* what() const noexcept {
+		return message;
+	}
+private:
+	const char * message;
+
+};
+
 class AbstractCloudCrypto {
 
 public:
 
-	static const unsigned int KEYSIZE = SHA512::DIGESTSIZE;
+	static const unsigned int KEYSIZE = SHA256::DIGESTSIZE;
 
-	bool SaveKeyToFile(string outputPathString) {
+	filesystem::path SaveKeyToFile(string outputPathString) {
 		filesystem::path outputPath(outputPathString);
 		return SaveKeyToFile(outputPath);
 	}
 
-	bool SaveKeyToFile(filesystem::path outputPath) {
+	filesystem::path SaveKeyToFile(filesystem::path outputPath) {
 		//hash
 		//name
 		//key
 		//signature of name+plain file
 
 		if (!IsInitialized())
-			return false;
+			throw CloudCryptoException("CloudCrypto object has not been initialized");
 
 		try {
 			property_tree::ptree properties;
@@ -55,9 +73,10 @@ public:
 
 			write_json(outputPath.native(), properties);
 		} catch (property_tree::ptree_error &e) {
-			return false;
+			throw CloudCryptoException("Unable to save key to file");
 		}
-		return true;
+
+		return outputPath;
 	}
 
 	static string BytesToHexString(const byte* data,
@@ -94,32 +113,27 @@ public:
 		return cipherFileNameBase;
 	}
 
-	const string& getDataFileExtension() const {
+	const string& getDataFileExtension() {
 		return dataFileExtension;
 	}
 
-	const string& getKeyFileExtension() const {
+	const string& getKeyFileExtension() {
 		return keyFileExtension;
 	}
 
-protected:
-	byte symmetricKey[KEYSIZE];
-	string cipherFileNameBase;
+	const byte* getSymmetricKey() const {
+		return symmetricKey;
+	}
 
-	const string dataFileExtension = ".data.cld";
-	const string keyFileExtension = ".key.cld";
-
-	AbstractCloudCrypto() {}
-
-	bool IsInitialized() {
-		return !cipherFileNameBase.empty();
+	const string getSymmetricKeyAsHexString() const {
+		string keyHexString;
+		return BytesToHexString(symmetricKey, KEYSIZE);
 	}
 
 	bool InitializeFromKeyFile(boost::filesystem::path keyFilePath) {
 
 		if (!filesystem::exists(keyFilePath))
 			return false;
-
 
 		string keyHexString;
 		string cipherFileNameBase;
@@ -131,7 +145,6 @@ protected:
 			keyHexString = properties.get<string>("Key");
 			if (keyHexString.size() / 2 != KEYSIZE)
 				return false;
-
 
 			string keyedFileName = properties.get<string>("KeyedFile");
 			cipherFileNameBase = keyedFileName.substr(0,
@@ -146,6 +159,22 @@ protected:
 
 		return true;
 	}
+
+
+protected:
+	byte symmetricKey[KEYSIZE];
+	string cipherFileNameBase;
+
+	const string dataFileExtension = ".data.cld";
+	const string keyFileExtension = ".key.cld";
+
+	AbstractCloudCrypto() {
+	}
+
+	bool IsInitialized() {
+		return !cipherFileNameBase.empty();
+	}
+
 
 };
 

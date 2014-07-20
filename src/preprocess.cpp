@@ -15,6 +15,8 @@ using namespace std;
 using namespace boost;
 
 #include <crypto++/hex.h>
+#include <crypto++/files.h>
+#include <crypto++/mqueue.h>
 using namespace CryptoPP;
 
 #include "CloudEncryptor.hpp"
@@ -24,14 +26,25 @@ int main(int argc, char **argv) {
 
 	filesystem::path outputPath("/home/doug/projects/cloud2/data");
 
-	CloudEncryptor enc("file.txt", "this is my passphrase");
-	enc.SaveKeyToFile(filesystem::path("/home/doug/projects/cloud2/data"));
+	filesystem::path in("/home/doug/projects/cloud2/data/test2.in");
 
-	filesystem::path keyFilePath = outputPath / (enc.getCipherFileNameBase() + enc.getKeyFileExtension());
 
+
+
+	CloudEncryptor enc("test2.in", "this is my passphrase");
+	enc.EncryptFile(in);
+
+	filesystem::path keyFilePath = enc.SaveKeyToFile(outputPath);
+
+	cout << keyFilePath.native() << "  " << enc.getSymmetricKeyAsHexString() << endl;
 
 	filesystem::path dataFilePath = outputPath / (enc.getCipherFileNameBase() + enc.getDataFileExtension());
-	CloudDecryptor::DecryptFile(keyFilePath, dataFilePath);
+//	CloudDecryptor::DecryptFile(keyFilePath, dataFilePath);
+
+	CloudDecryptor dec;
+	dec.InitializeFromKeyFile(keyFilePath);
+
+	cout << keyFilePath.native() << "  " << dec.getSymmetricKeyAsHexString() << endl;
 
 
 }
