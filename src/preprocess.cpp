@@ -24,6 +24,19 @@ using namespace CryptoPP;
 
 int main(int argc, char **argv) {
 
+
+//	ByteQueue bytes;
+//
+//	byte a[] = "this is the first part ";
+//	byte b[] = "this is the second part ";
+//	bytes.Put(a, sizeof(a));
+//	bytes.Put(b, sizeof(b));
+//	bytes.MessageEnd();
+//
+//	FileSink f("/home/doug/projects/cloud2/data/test.out", true);
+//	bytes.CopyTo(f);
+//	f.MessageEnd();
+
 	filesystem::path outputPath("/home/doug/projects/cloud2/data");
 
 	filesystem::path in("/home/doug/projects/cloud2/data/test2.in");
@@ -32,19 +45,19 @@ int main(int argc, char **argv) {
 
 
 	CloudEncryptor enc("test2.in", "this is my passphrase");
-	enc.EncryptFile(in);
+	enc.EncryptFile2(in);
 
 	filesystem::path keyFilePath = enc.SaveKeyToFile(outputPath);
 
 	cout << keyFilePath.native() << "  " << enc.getSymmetricKeyAsHexString() << endl;
 
 	filesystem::path dataFilePath = outputPath / (enc.getCipherFileNameBase() + enc.getDataFileExtension());
-//	CloudDecryptor::DecryptFile(keyFilePath, dataFilePath);
+	CloudDecryptor::DecryptFile(keyFilePath, dataFilePath);
 
-	CloudDecryptor dec;
-	dec.InitializeFromKeyFile(keyFilePath);
+//	CloudDecryptor dec;
+//	dec.InitializeFromKeyFile(keyFilePath);
 
-	cout << keyFilePath.native() << "  " << dec.getSymmetricKeyAsHexString() << endl;
+//	cout << keyFilePath.native() << "  " << dec.getSymmetricKeyAsHexString() << endl;
 
 
 }
