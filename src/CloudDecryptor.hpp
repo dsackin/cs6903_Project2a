@@ -63,7 +63,7 @@ public:
 
 	static bool DecryptFile(filesystem::path keyFilePath, filesystem::path dataFilePath) {
 		CloudDecryptor decryptor;
-		decryptor.InitializeFromKeyFile(keyFilePath);
+		decryptor.InitializeFromJsonKeyFile(keyFilePath);
 		decryptor.DecryptFile(dataFilePath);
 
 		return true;

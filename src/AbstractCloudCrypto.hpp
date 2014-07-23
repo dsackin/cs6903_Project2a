@@ -46,12 +46,12 @@ public:
 
 	static const unsigned int KEYSIZE = SHA256::DIGESTSIZE;
 
-	filesystem::path SaveKeyToFile(string outputPathString) {
+	filesystem::path SaveKeyToJsonFile(string outputPathString) {
 		filesystem::path outputPath(outputPathString);
-		return SaveKeyToFile(outputPath);
+		return SaveKeyToJsonFile(outputPath);
 	}
 
-	filesystem::path SaveKeyToFile(filesystem::path outputPath) {
+	filesystem::path SaveKeyToJsonFile(filesystem::path outputPath) {
 		//hash
 		//name
 		//key
@@ -81,32 +81,25 @@ public:
 
 	static string BytesToHexString(const byte* data,
 			const unsigned int dataLength) {
-		byte str[2 * dataLength + 1];
 
-		HexEncoder e;
+		string out;
+		MeterFilter meter(new StringSink(out));
+		ArraySource in(data, dataLength, true, new HexEncoder(new Redirector(meter), false));
 
-		HexEncoder encoder;
-		encoder.Put(data, dataLength);
-		encoder.MessageEnd();
-		encoder.Get(str, 2 * dataLength);
-		str[2 * dataLength] = 0;
-
-		return string((char*) str);
-
+		return out;
 	}
 
-	static bool HexStringToBytes(string str, byte* data,
+	static int HexStringToBytes(string str, byte* data,
 			const unsigned int dataLength) {
 
 		if (dataLength < str.size() / 2)
-			return false;
+			return 0;
 
-		HexDecoder decoder;
-		decoder.Put((byte*) str.c_str(), str.size());
-		decoder.MessageEnd();
-		decoder.Get(data, str.size() / 2);
+		MeterFilter meter(new ArraySink(data, dataLength));
 
-		return true;
+		StringSource in(str, true, new HexDecoder(new Redirector(meter)));
+
+		return meter.GetTotalBytes();
 	}
 
 	const string& getCipherFileNameBase() const {
@@ -130,7 +123,7 @@ public:
 		return BytesToHexString(symmetricKey, KEYSIZE);
 	}
 
-	bool InitializeFromKeyFile(boost::filesystem::path keyFilePath) {
+	bool InitializeFromJsonKeyFile(boost::filesystem::path keyFilePath) {
 
 		if (!filesystem::exists(keyFilePath))
 			return false;
