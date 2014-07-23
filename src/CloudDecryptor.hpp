@@ -28,48 +28,37 @@ public:
 			throw CloudCryptoException(
 					"Decryptor has not been initialized with a key");
 
-		filesystem::path resultFilePath = cipherFilePath.parent_path() / "decrypted";
 
 		byte iv[AES::BLOCKSIZE];
 		memset(iv, 0x01, AES::BLOCKSIZE);
 
 		unsigned short ivSize, plainFileNameSize;
 
-//		std::ifstream is(cipherFilePath.native());
-//		is >> ivSize;
-//		is >> iv;
-//
-//		FileSource in(is, true);
-
 		FileSource in(cipherFilePath.c_str(), false);
-		cout << in.MaxRetrievable() << endl;
 
 		in.Pump(2);
-		cout << in.MaxRetrievable() << endl;
-
 		in.GetWord16(ivSize);
+
 		in.Pump(ivSize);
-		cout << in.MaxRetrievable() << endl;
 		in.Get(iv, ivSize);
 
-//		is.seekg(18);
-
-		cout << in.MaxRetrievable() << endl;
-
-		// stf->GetWord16(plainFileNameSize);
-
-		// byte plainFileName[plainFileNameSize];
-		// stf->Get(plainFileName, plainFileNameSize);
-
-
 		CTR_Mode<AES>::Decryption aes_ctr_dec(getSymmetricKey(), KEYSIZE, iv);
-
-
-		StreamTransformationFilter *stf = new StreamTransformationFilter(aes_ctr_dec, new FileSink(resultFilePath.c_str()));
+		StreamTransformationFilter *stf = new StreamTransformationFilter(aes_ctr_dec);
 		in.Attach(stf);
-		in.PumpAll();
-//		is.close();
 
+		in.Pump(2);
+		stf->GetWord16(plainFileNameSize);
+
+		byte plainFileName[plainFileNameSize];
+		in.Pump(plainFileNameSize);
+		stf->Get(plainFileName, plainFileNameSize);
+		cout << plainFileName << endl;
+
+		string plainFileNameString((const char*)plainFileName);
+		filesystem::path resultFilePath = cipherFilePath.parent_path() / plainFileNameString;
+
+		stf->Detach(new FileSink(resultFilePath.c_str()));
+		in.PumpAll();
 	}
 
 	static bool DecryptFile(filesystem::path keyFilePath, filesystem::path dataFilePath) {

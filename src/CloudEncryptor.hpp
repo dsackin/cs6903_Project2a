@@ -12,6 +12,7 @@
 #include <crypto++/aes.h>
 #include <crypto++/modes.h>
 #include <crypto++/files.h>
+#include <crypto++/osrng.h>
 #include <crypto++/eax.h>
 
 #include "AbstractCloudCrypto.hpp"
@@ -54,55 +55,28 @@ public:
 		if (!exists(plainFilePath))
 			throw CloudCryptoException("Path to plain file was not valid");
 
-		byte key[KEYSIZE], iv[AES::BLOCKSIZE];
-		memset(key, 0x00, KEYSIZE);
-		memset(iv, 0x00, AES::BLOCKSIZE);
+		byte iv[AES::BLOCKSIZE];
+
+		AutoSeededRandomPool rng;
+		rng.GenerateBlock(iv, AES::BLOCKSIZE);
 
 		filesystem::path cipherFilePath = plainFilePath.parent_path()
 				/ (cipherFileNameBase + getDataFileExtension());
-
-		CTR_Mode<AES>::Encryption aes_ctr_enc(getSymmetricKey(), KEYSIZE, iv);
-		byte data[1024];
-		memset(data, 0x00, 1024);
 
 		FileSink *out = new FileSink(cipherFilePath.c_str());
 		out->PutWord16(sizeof(iv));
 		out->Put(iv, sizeof(iv));
-		out->MessageEnd();
 
+		CTR_Mode<AES>::Encryption aes_ctr_enc(getSymmetricKey(), KEYSIZE, iv);
 		StreamTransformationFilter *stf = new StreamTransformationFilter(aes_ctr_enc, out);
 
-//		string plainFileName = plainFilePath.filename().native();
-//		unsigned short plainFileNameSize = plainFileName.size();
-//		stf->PutWord16(plainFileNameSize);
-//		stf->Put((byte*)plainFileName.c_str(), plainFileName.size());
+		string plainFileName = plainFilePath.filename().native();
+		unsigned short plainFileNameSize = plainFileName.size() + 1;
+		stf->PutWord16(plainFileNameSize);
+		stf->Put((byte*)plainFileName.c_str(), plainFileNameSize);
 
 		FileSource in(plainFilePath.c_str(), true, stf);
 		out->MessageEnd();
-	}
-
-
-	void EncryptFile(filesystem::path plainFilePath) {
-
-		if (!IsInitialized())
-			throw CloudCryptoException(
-					"Encryptor has not been initialized with a key");
-
-		if (!exists(plainFilePath))
-			throw CloudCryptoException("Path to plain file was not valid");
-
-		byte key[KEYSIZE], iv[AES::BLOCKSIZE];
-		memset(key, 0x00, KEYSIZE);
-		memset(iv, 0x00, AES::BLOCKSIZE);
-
-		filesystem::path cipherFilePath = plainFilePath.parent_path()
-				/ (cipherFileNameBase + getDataFileExtension());
-
-
-		CTR_Mode<AES>::Encryption aes_ctr_enc(getSymmetricKey(), KEYSIZE, iv);
-		FileSource f(plainFilePath.native().c_str(), true,
-				new StreamTransformationFilter(aes_ctr_enc,
-						new FileSink(cipherFilePath.native().c_str())));
 	}
 
 	const string& getPlainFileName() const {

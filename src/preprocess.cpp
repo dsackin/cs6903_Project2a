@@ -39,12 +39,12 @@ int main(int argc, char **argv) {
 
 	filesystem::path outputPath("/home/doug/projects/cloud2/data");
 
-	filesystem::path in("/home/doug/projects/cloud2/data/test2.in");
+	filesystem::path in("/home/doug/projects/cloud2/data/test.in");
 
 
 
 
-	CloudEncryptor enc("test2.in", "this is my passphrase");
+	CloudEncryptor enc("test.in", "this is my passphrase");
 	enc.EncryptFile2(in);
 
 	filesystem::path keyFilePath = enc.SaveKeyToFile(outputPath);
