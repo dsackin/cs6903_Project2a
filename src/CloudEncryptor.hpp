@@ -21,47 +21,34 @@ class CloudEncryptor: public AbstractCloudCrypto {
 
 public:
 
-	CloudEncryptor(const string plainFileName, const byte *masterKey,
-			unsigned int masterKeyLength) {
+	CloudEncryptor(const string plainFileName, const string masterKeyString) {
 
-		DeducePlainFileName(plainFileName);
-		DeriveSymmetricKey(plainFileName, masterKey, masterKeyLength);
-		DeriveObfuscatedNameBase();
-	}
+		byte masterKeyBytes[KEYSIZE];
 
-	CloudEncryptor(const string plainFileName, const string masterPassPhrase) {
+		if ((masterKeyString.length() == 2 * KEYSIZE) && IsHexString(masterKeyString)) {
+			HexStringToBytes(masterKeyString, masterKeyBytes, KEYSIZE);
+		} else {
+			// treat the key string input as a passphrase and use its SHA256 hash as the key bytes
+			SHA256 hash;
+			hash.CalculateDigest(masterKeyBytes, (byte*) masterKeyString.c_str(),
+					masterKeyString.size());
+		}
 
-		DeducePlainFileName(plainFileName);
-
-		byte phraseHash[KEYSIZE];
-
-		SHA256 hash;
-		hash.CalculateDigest(phraseHash, (byte*) masterPassPhrase.c_str(),
-				masterPassPhrase.size());
-
-		DeriveSymmetricKey(plainFileName, phraseHash, KEYSIZE);
+		DeriveSymmetricKey(plainFileName, masterKeyBytes, KEYSIZE);
 		DeriveObfuscatedNameBase();
 	}
 
 	~CloudEncryptor() {
 	}
 
-	void EncryptFile2(filesystem::path plainFilePath) {
-
-		if (!IsInitialized())
-			throw CloudCryptoException(
-					"Encryptor has not been initialized with a key");
-
-		if (!exists(plainFilePath))
-			throw CloudCryptoException("Path to plain file was not valid");
+	void EncryptFile(filesystem::path plainFilePath, filesystem::path outputDirPath) {
 
 		byte iv[AES::BLOCKSIZE];
 
 		AutoSeededRandomPool rng;
 		rng.GenerateBlock(iv, AES::BLOCKSIZE);
 
-		filesystem::path cipherFilePath = plainFilePath.parent_path()
-				/ (cipherFileNameBase + getDataFileExtension());
+		filesystem::path cipherFilePath = outputDirPath / (cipherFileNameBase + getDataFileExtension());
 
 		FileSink *out = new FileSink(cipherFilePath.c_str());
 		out->PutWord16(sizeof(iv));
@@ -77,29 +64,52 @@ public:
 
 		FileSource in(plainFilePath.c_str(), true, stf);
 		out->MessageEnd();
+
+		cout << "Encryption Results" << endl;
+		cout << "Plain file : " << plainFilePath.native() << endl;
+		cout << "Encrypted file : " << cipherFilePath.native() << endl;
+
+	}
+
+	void ExportKey(filesystem::path outputDirPath) {
+
+		string keyHexString = getSymmetricKeyAsHexString();
+		filesystem::path keyFileName(getCipherFileNameBase() + getKeyFileExtension());
+
+		filesystem::path keyFilePath = outputDirPath / keyFileName;
+
+		StringSource in(keyHexString, true, new FileSink(keyFilePath.c_str()));
+
+		cout << "Export Results" << endl;
+		cout << "Plain file : " << getPlainFileName() << endl;
+		cout << "Encrypted file : " << getCipherFileNameBase() + getDataFileExtension() << endl;
+		cout << "Key file : " << keyFilePath << endl;
+		cout << "key value : " << keyHexString << endl;
 	}
 
 	const string& getPlainFileName() const {
 		return plainFileName;
 	}
 
+	const string& getCipherFileNameBase() const {
+		return cipherFileNameBase;
+	}
+
+	const string& getDataFileExtension() {
+		return dataFileExtension;
+	}
+
+	const string& getKeyFileExtension() {
+		return keyFileExtension;
+	}
+
+
 protected:
 	string plainFileName;
+	string cipherFileNameBase;
 
-	/**
-	 * Deduce whether the string provided as the plain file name is a path to
-	 * a file or the name of the file. Test it as a path first. If it exists,
-	 * then extract the filename. If not, just use the string as it arrived.
-	 */
-	void DeducePlainFileName(const string plainFile) {
-
-		filesystem::path plainFilePath(plainFile);
-
-		if (exists(plainFilePath))
-			plainFileName = plainFilePath.filename().native();
-		else
-			plainFileName = plainFile;
-	}
+	const string dataFileExtension = ".data.cld";
+	const string keyFileExtension = ".key.cld";
 
 	void DeriveSymmetricKey(const string plainFileName, const byte *masterKey,
 			unsigned int masterKeyLength) {

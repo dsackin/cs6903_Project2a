@@ -19,15 +19,9 @@ class CloudDecryptor: public AbstractCloudCrypto {
 
 public:
 
-	CloudDecryptor() {}
 	~CloudDecryptor() {}
 
-	void DecryptFile(filesystem::path cipherFilePath) {
-
-		if (!IsInitialized())
-			throw CloudCryptoException(
-					"Decryptor has not been initialized with a key");
-
+	void DecryptFile(filesystem::path cipherFilePath, filesystem::path outputDirPath) {
 
 		byte iv[AES::BLOCKSIZE];
 		memset(iv, 0x01, AES::BLOCKSIZE);
@@ -55,20 +49,38 @@ public:
 		cout << plainFileName << endl;
 
 		string plainFileNameString((const char*)plainFileName);
-		filesystem::path resultFilePath = cipherFilePath.parent_path() / plainFileNameString;
+		filesystem::path resultFilePath = outputDirPath / plainFileNameString;
+
+		// check if we are trying to decrypt in the directory where the original
+		// file name is already in use. If so, insert ".decrypted" before the
+		// extension
+		if (filesystem::exists(resultFilePath)) {
+			filesystem::path outputFileName(plainFileNameString);
+			string currentExtension = outputFileName.extension().native();
+			outputFileName.replace_extension(filesystem::path(".decrypted." + currentExtension));
+			resultFilePath = outputDirPath / outputFileName;
+		}
 
 		stf->Detach(new FileSink(resultFilePath.c_str()));
 		in.PumpAll();
 	}
 
-	static bool DecryptFile(filesystem::path keyFilePath, filesystem::path dataFilePath) {
-		CloudDecryptor decryptor;
-		decryptor.InitializeFromJsonKeyFile(keyFilePath);
-		decryptor.DecryptFile(dataFilePath);
+	static bool DecryptFile(string keyString, filesystem::path cipherFilePath, filesystem::path outputDirPath) {
 
-		return true;
+		byte symmetricKeyBytes[KEYSIZE];
+
+		if ((keyString.length() == 2 * KEYSIZE) && IsHexString(keyString)) {
+			HexStringToBytes(keyString, symmetricKeyBytes, KEYSIZE);
+			CloudDecryptor decryptor(symmetricKeyBytes);
+			decryptor.DecryptFile(cipherFilePath, outputDirPath);
+			return true;
+		}
+
+		return false;
 	}
 
+protected:
+	CloudDecryptor(byte *symmetricKey) : symmetricKey(symmetricKey) {}
 
 };
 

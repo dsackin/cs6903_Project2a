@@ -46,39 +46,6 @@ public:
 
 	static const unsigned int KEYSIZE = SHA256::DIGESTSIZE;
 
-	filesystem::path SaveKeyToJsonFile(string outputPathString) {
-		filesystem::path outputPath(outputPathString);
-		return SaveKeyToJsonFile(outputPath);
-	}
-
-	filesystem::path SaveKeyToJsonFile(filesystem::path outputPath) {
-		//hash
-		//name
-		//key
-		//signature of name+plain file
-
-		if (!IsInitialized())
-			throw CloudCryptoException("CloudCrypto object has not been initialized");
-
-		try {
-			property_tree::ptree properties;
-
-			properties.put("KeyedFile", cipherFileNameBase + dataFileExtension);
-
-			string symmetricKeyString = BytesToHexString(symmetricKey,
-					sizeof(symmetricKey));
-			properties.put("Key", symmetricKeyString);
-
-			outputPath /= (cipherFileNameBase + keyFileExtension);
-
-			write_json(outputPath.native(), properties);
-		} catch (property_tree::ptree_error &e) {
-			throw CloudCryptoException("Unable to save key to file");
-		}
-
-		return outputPath;
-	}
-
 	static string BytesToHexString(const byte* data,
 			const unsigned int dataLength) {
 
@@ -102,16 +69,9 @@ public:
 		return meter.GetTotalBytes();
 	}
 
-	const string& getCipherFileNameBase() const {
-		return cipherFileNameBase;
-	}
-
-	const string& getDataFileExtension() {
-		return dataFileExtension;
-	}
-
-	const string& getKeyFileExtension() {
-		return keyFileExtension;
+	static bool IsHexString(string candidate) {
+		regex hexDigitsOnly("^[[:xdigit:]]+$");
+		return boost::regex_match(candidate, hexDigitsOnly);
 	}
 
 	const byte* getSymmetricKey() const {
@@ -123,51 +83,11 @@ public:
 		return BytesToHexString(symmetricKey, KEYSIZE);
 	}
 
-	bool InitializeFromJsonKeyFile(boost::filesystem::path keyFilePath) {
-
-		if (!filesystem::exists(keyFilePath))
-			return false;
-
-		string keyHexString;
-		string cipherFileNameBase;
-
-		try {
-			property_tree::ptree properties;
-			property_tree::read_json(keyFilePath.native(), properties);
-
-			keyHexString = properties.get<string>("Key");
-			if (keyHexString.size() / 2 != KEYSIZE)
-				return false;
-
-			string keyedFileName = properties.get<string>("KeyedFile");
-			cipherFileNameBase = keyedFileName.substr(0,
-					keyedFileName.find_last_of(dataFileExtension));
-
-		} catch (property_tree::ptree_error &e) {
-			return false;
-		}
-
-		HexStringToBytes(keyHexString, symmetricKey, KEYSIZE);
-		this->cipherFileNameBase = cipherFileNameBase;
-
-		return true;
-	}
-
 
 protected:
 	byte symmetricKey[KEYSIZE];
-	string cipherFileNameBase;
 
-	const string dataFileExtension = ".data.cld";
-	const string keyFileExtension = ".key.cld";
-
-	AbstractCloudCrypto() {
-	}
-
-	bool IsInitialized() {
-		return !cipherFileNameBase.empty();
-	}
-
+	AbstractCloudCrypto() {}
 
 };
 
