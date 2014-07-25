@@ -22,21 +22,276 @@ namespace po = boost::program_options;
 #include <crypto++/hex.h>
 #include <crypto++/files.h>
 #include <crypto++/mqueue.h>
+#include <crypto++/sha.h>
+#include <crypto++/hmac.h>
+#include <crypto++/aes.h>
+#include <crypto++/modes.h>
+#include <crypto++/files.h>
+#include <crypto++/osrng.h>
 using namespace CryptoPP;
 
-#include "common.h"
+typedef unsigned char byte;
 
-#include "CloudEncryptor.hpp"
-#include "CloudDecryptor.hpp"
+class CloudCrypto {
+
+protected:
+	static const unsigned int KEYSIZE = SHA256::DIGESTSIZE;
+
+	static const unsigned short KEYTEST = 43981;
+
+	byte symmetricKey[KEYSIZE];
+
+	string plainFileName;
+	string encryptedFileNameBase;
+
+	const string encryptedFileExtension = ".enc.cld";
+	const string encryptedSignedFileExtension = ".encsign.cld";
+	const string decryptedFileExtension = ".dec.cld";
+	const string decryptedValidatedFileExtension = ".decval.cld";
+	const string keyFileExtension = ".key.cld";
+
+public:
+
+	CloudCrypto(const string plainFileName, const string masterKeyString) : plainFileName(plainFileName) {
+
+		byte masterKeyBytes[KEYSIZE];
+
+		if ((masterKeyString.length() == 2 * KEYSIZE) && IsHexString(masterKeyString)) {
+			HexStringToBytes(masterKeyString, masterKeyBytes, KEYSIZE);
+		} else {
+			// treat the key string input as a passphrase and use its SHA256 hash as the key bytes
+			SHA256 hash;
+			hash.CalculateDigest(masterKeyBytes, (byte*) masterKeyString.c_str(),
+					masterKeyString.size());
+		}
+
+		DeriveSymmetricKey(plainFileName, masterKeyBytes, KEYSIZE);
+		DeriveEncryptedFileNameBase();
+	}
+
+	~CloudCrypto() {
+	}
+
+	void EncryptFile(filesystem::path plainFilePath, filesystem::path outputDirPath) {
+
+		byte iv[AES::BLOCKSIZE];
+
+		AutoSeededRandomPool rng;
+		rng.GenerateBlock(iv, AES::BLOCKSIZE);
+
+		filesystem::path cipherFilePath = outputDirPath / GetEncryptedFileName();
+
+		FileSink *out = new FileSink(cipherFilePath.c_str());
+		out->PutWord16(sizeof(iv));
+		out->Put(iv, sizeof(iv));
+
+		CTR_Mode<AES>::Encryption aes_ctr_enc(GetSymmetricKey(), KEYSIZE, iv);
+		StreamTransformationFilter *stf = new StreamTransformationFilter(aes_ctr_enc, out);
+
+		// write endian and key test value
+		stf->PutWord16(KEYTEST);
+
+		string plainFileName = plainFilePath.filename().native();
+		unsigned short plainFileNameSize = plainFileName.size() + 1;
+		stf->PutWord16(plainFileNameSize);
+		stf->Put((byte*)plainFileName.c_str(), plainFileNameSize);
+
+		FileSource in(plainFilePath.c_str(), true, stf);
+		out->MessageEnd();
+
+		cout << "Encryption Results" << endl;
+		cout << "Plain file : " << plainFilePath.native() << endl;
+		cout << "Encrypted file : " << cipherFilePath.native() << endl;
+
+	}
+
+	void ExportKey(filesystem::path outputDirPath) {
+
+		string keyHexString = GetSymmetricKeyAsHexString();
+
+		filesystem::path keyFilePath = outputDirPath / GetKeyFileName();
+
+		StringSource in(keyHexString, true, new FileSink(keyFilePath.c_str()));
+
+		cout << "Export Results" << endl;
+		cout << "Plain file : " << GetPlainFileName() << endl;
+		cout << "Encrypted file : " << GetEncryptedFileName() << endl;
+		cout << "Key file : " << keyFilePath << endl;
+		cout << "key value : " << keyHexString << endl;
+	}
+
+
+	filesystem::path DecryptFile(filesystem::path encryptedFilePath, filesystem::path outputDirPath) {
+
+		byte iv[AES::BLOCKSIZE];
+		memset(iv, 0x01, AES::BLOCKSIZE);
+
+		unsigned short ivSize = 0;
+
+		FileSource in(encryptedFilePath.c_str(), false);
+
+		in.Pump(2);
+		in.GetWord16(ivSize);
+
+		in.Pump(ivSize);
+		in.Get(iv, ivSize);
+
+		CTR_Mode<AES>::Decryption aes_ctr_dec(GetSymmetricKey(), KEYSIZE, iv);
+		StreamTransformationFilter *stf = new StreamTransformationFilter(aes_ctr_dec);
+		in.Attach(stf);
+
+		unsigned short keyTest = 0;
+		in.Pump(2);
+		stf->GetWord16(keyTest);
+
+		if (keyTest != KEYTEST) {
+			cout << "Decryption failed. Check your key value for " << encryptedFilePath.native() << endl;
+			exit(EXIT_FAILURE);
+		}
+
+		unsigned short plainFileNameSize = 0;
+		in.Pump(2);
+		stf->GetWord16(plainFileNameSize);
+
+
+		byte plainFileNameBytes[plainFileNameSize];
+		in.Pump(plainFileNameSize);
+		stf->Get(plainFileNameBytes, plainFileNameSize);
+
+		plainFileName = string((const char*)plainFileNameBytes);
+		filesystem::path resultFilePath = outputDirPath / GetDecryptedFileName();
+
+		stf->Detach(new FileSink(resultFilePath.c_str()));
+		in.PumpAll();
+
+		cout << "Decryption Results" << endl;
+		cout << "Encrypted file : " << encryptedFilePath.native() << endl;
+		cout << "Decrypted file : " << resultFilePath.native() << endl;
+		cout << "Original file : " << plainFileName << endl;
+
+		return resultFilePath;
+	}
+
+	static bool DecryptFile(string keyString, filesystem::path encryptedFilePath, filesystem::path outputDirPath, string encryptedFileName = "") {
+
+		byte symmetricKeyBytes[KEYSIZE];
+
+		if ((keyString.length() == 2 * KEYSIZE) && IsHexString(keyString)) {
+			HexStringToBytes(keyString, symmetricKeyBytes, KEYSIZE);
+			CloudCrypto decryptor(symmetricKeyBytes, encryptedFileName);
+			filesystem::path resultPath = decryptor.DecryptFile(encryptedFilePath, outputDirPath);
+
+			return true;
+		}
+
+		return false;
+	}
+
+	static string BytesToHexString(const byte* data,
+			const unsigned int dataLength) {
+
+		string out;
+		MeterFilter meter(new StringSink(out));
+		ArraySource in(data, dataLength, true, new HexEncoder(new Redirector(meter), false));
+
+		return out;
+	}
+
+	static int HexStringToBytes(string str, byte* data,
+			const unsigned int dataLength) {
+
+		if (dataLength < str.size() / 2)
+			return 0;
+
+		MeterFilter meter(new ArraySink(data, dataLength));
+
+		StringSource in(str, true, new HexDecoder(new Redirector(meter)));
+
+		return meter.GetTotalBytes();
+	}
+
+	static bool IsHexString(string candidate) {
+		regex hexDigitsOnly("^[[:xdigit:]]+$");
+		return boost::regex_match(candidate, hexDigitsOnly);
+	}
+
+	const byte* GetSymmetricKey() const {
+		return symmetricKey;
+	}
+
+	const string GetSymmetricKeyAsHexString() const {
+		string keyHexString;
+		return BytesToHexString(symmetricKey, KEYSIZE);
+	}
+
+	const string GetPlainFileName() const {
+		return plainFileName;
+	}
+
+	const string GetEncryptedFileName(bool isSigned = false) {
+		return encryptedFileNameBase + (isSigned ? encryptedSignedFileExtension : encryptedFileExtension);
+	}
+
+	const string GetDecryptedFileName(bool isSigned = false) {
+
+		string decryptedFileName = encryptedFileNameBase + (isSigned ? decryptedValidatedFileExtension : decryptedFileExtension);
+
+		if (!plainFileName.empty())
+			decryptedFileName += filesystem::path(plainFileName).extension().native();
+
+		return decryptedFileName;
+	}
+
+	const string GetKeyFileName() {
+		return encryptedFileNameBase + keyFileExtension;
+	}
+
+protected:
+	CloudCrypto(byte *symmetricKey, string encryptedFileName) {
+		memcpy(this->symmetricKey, symmetricKey, KEYSIZE);
+
+		if (!encryptedFileName.empty()) {
+			encryptedFileNameBase = encryptedFileName;
+
+			int dot = encryptedFileName.find('.', 0);
+			if (dot != string::npos)
+				encryptedFileNameBase = encryptedFileNameBase.substr(0, dot);
+		}
+	}
+
+
+	void DeriveSymmetricKey(const string plainFileName, const byte *masterKeyBytes,
+			unsigned int masterKeyLength) {
+
+		HMAC<SHA256> hmac(masterKeyBytes, KEYSIZE);
+		hmac.CalculateDigest(symmetricKey, (byte*) plainFileName.c_str(),
+				plainFileName.size());
+	}
+
+	void DeriveEncryptedFileNameBase() {
+
+		byte nameHash[KEYSIZE];
+
+		SHA256 hash;
+		hash.CalculateDigest(nameHash, (byte*) plainFileName.c_str(),
+				plainFileName.length());
+
+		string nameHashString = BytesToHexString(nameHash, KEYSIZE);
+
+		encryptedFileNameBase = nameHashString.substr(0, 4) + "-"
+				+ nameHashString.substr(4, 4) + "-"
+				+ nameHashString.substr(nameHashString.size() - 8, 4) + "-"
+				+ nameHashString.substr(nameHashString.size() - 4, 4);
+	}
+
+};
 
 // globals
-filesystem::path uninitializedPath = filesystem::path("UNINIT");
-
 string usageMessage = "";
 string keyInput = "";
-filesystem::path inputFilePath = uninitializedPath;
+filesystem::path inputFilePath("");
 string filenameInput = "";
-filesystem::path outputDirPath = uninitializedPath;
+filesystem::path outputDirPath("");
 
 map<string, string> parse_arguments(int argc, char **argv) {
 	po::options_description options("Cloud crypto commands");
@@ -51,9 +306,9 @@ map<string, string> parse_arguments(int argc, char **argv) {
 			"outputDir,o", po::value<string>(),
 			"Path to output directory (optional). If omitted, reuse input directory.");
 
-	ostringstream os(usageMessage);
+	ostringstream os;
 	os << options << endl << endl;
-	os.flush();
+	usageMessage = os.str();
 
 	po::positional_options_description positionals;
 	positionals.add("command", 1);
@@ -103,6 +358,7 @@ map<string, string> parse_arguments(int argc, char **argv) {
  */
 bool ValidatePreprocessArguments(map<string, string> args) {
 	if (!(args.count("key") && args.count("inputFile"))) {
+		cout << "ERROR: Key and input file are required arguments to 'preprocess'" << endl << endl;
 		return false;
 	}
 
@@ -118,9 +374,10 @@ bool ValidatePreprocessArguments(map<string, string> args) {
 	filesystem::path inputPath(args["inputFile"]);
 	if (filesystem::exists(inputPath) && filesystem::is_regular_file(inputPath))
 		inputFilePath = inputPath;
-	else
-		// input file does not exist
+	else {
+		cout << "ERROR: Input file not found: " << inputPath.native() << endl << endl;
 		return false;
+	}
 
 	// interpret name (optional)
 	if (args.count("name")) {
@@ -153,6 +410,7 @@ bool ValidatePreprocessArguments(map<string, string> args) {
  */
 bool ValidateAuthorizeArguments(map<string, string> args) {
 	if (!(args.count("key") && (args.count("name") || args.count("inputFile")))) {
+		cout << "ERROR: Key and input file or input file name are required arguments to 'authorize'" << endl << endl;
 		return false;
 	}
 
@@ -168,6 +426,10 @@ bool ValidateAuthorizeArguments(map<string, string> args) {
 	filesystem::path inputPath(args["inputFile"]);
 	if (filesystem::exists(inputPath) && filesystem::is_regular_file(inputPath))
 		inputFilePath = inputPath;
+	else {
+		cout << "ERROR: Input file not found: " << inputPath.native() << endl << endl;
+		return false;
+	}
 
 	// interpret name (required if inputFile not specified)
 	if (args.count("name")) {
@@ -179,18 +441,20 @@ bool ValidateAuthorizeArguments(map<string, string> args) {
 			// no file, just use the string as the name
 			filenameInput = args["name"];
 		}
-	} else if (uninitializedPath != inputFilePath)
+	} else if (!inputFilePath.empty())
 		// name arg not used, use name of input file, if provided
 		filenameInput = inputFilePath.filename().native();
-	else
+	else {
 		// no resource for name (which is required). fail out.
+		cout << "ERROR: Unable to determine name for encrypted file." << endl << endl;
 		return false;
+	}
 
 	// interpret outputDir as path to directory
 	filesystem::path outputPath(args["outputDir"]);
 	if (filesystem::exists(outputPath) && filesystem::is_directory(outputPath))
 		outputDirPath = outputPath;
-	else if (uninitializedPath != inputFilePath)
+	else if (!inputFilePath.empty())
 		// use directory of input file as output directory
 		outputDirPath = inputFilePath.parent_path();
 	else
@@ -206,6 +470,7 @@ bool ValidateAuthorizeArguments(map<string, string> args) {
  */
 bool ValidateRecoverArguments(map<string, string> args) {
 	if (!(args.count("key") && args.count("inputFile"))) {
+		cout << "ERROR: Key and input file are required arguments to 'recover'" << endl << endl;
 		return false;
 	}
 
@@ -218,13 +483,19 @@ bool ValidateRecoverArguments(map<string, string> args) {
 		keyInput = args["key"];
 
 	// for this command, key must be bytes as a hex string
-	if (!AbstractCloudCrypto::IsHexString(keyInput))
+	if (!CloudCrypto::IsHexString(keyInput)) {
+		cout << "ERROR: Key value provided was not parseable as 32 bytes in hex representation." << endl << endl;
 		return false;
+	}
 
 	// interpret inputFile as path to file
 	filesystem::path inputPath(args["inputFile"]);
 	if (filesystem::exists(inputPath) && filesystem::is_regular_file(inputPath))
 		inputFilePath = inputPath;
+	else {
+		cout << "ERROR: Input file not found: " << inputPath.native() << endl << endl;
+		return false;
+	}
 
 	// interpret name - serves no purpose since name is in encrypted data
 	if (args.count("name")) {
@@ -234,16 +505,18 @@ bool ValidateRecoverArguments(map<string, string> args) {
 			FileSource in(namePath.c_str(), true, new StringSink(filenameInput));
 		else
 			filenameInput = args["name"];
-	} else if (uninitializedPath != inputFilePath)
+	} else if (!inputFilePath.empty())
 		filenameInput = inputFilePath.filename().native();
-	else
+	else {
+		cout << "ERROR: Unable to set name of encrypted file" << endl << endl;
 		return false;
+	}
 
 	// interpret outputDir as path to directory
 	filesystem::path outputPath(args["outputDir"]);
 	if (filesystem::exists(outputPath) && filesystem::is_directory(outputPath))
 		outputDirPath = outputPath;
-	else if (uninitializedPath != inputFilePath)
+	else if (!inputFilePath.empty())
 		// use directory of input file as output directory
 		outputDirPath = inputFilePath.parent_path();
 	else
@@ -261,7 +534,7 @@ void Preprocess(map<string, string> args) {
 		exit(EXIT_FAILURE);
 	}
 
-	CloudEncryptor encryptor(filenameInput, keyInput);
+	CloudCrypto encryptor(filenameInput, keyInput);
 	encryptor.EncryptFile(inputFilePath, outputDirPath);
 }
 
@@ -271,7 +544,7 @@ void Authorize(map<string, string> args) {
 		exit(EXIT_FAILURE);
 	}
 
-	CloudEncryptor encryptor(filenameInput, keyInput);
+	CloudCrypto encryptor(filenameInput, keyInput);
 	encryptor.ExportKey(outputDirPath);
 }
 
@@ -281,7 +554,7 @@ void Recover(map<string, string> args) {
 		exit(EXIT_FAILURE);
 	}
 
-	CloudDecryptor::DecryptFile(keyInput, inputFilePath, outputDirPath);
+	CloudCrypto::DecryptFile(keyInput, inputFilePath, outputDirPath, filenameInput);
 }
 
 /**
