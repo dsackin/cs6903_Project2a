@@ -21,7 +21,7 @@ class CloudEncryptor: public AbstractCloudCrypto {
 
 public:
 
-	CloudEncryptor(const string plainFileName, const string masterKeyString) {
+	CloudEncryptor(const string plainFileName, const string masterKeyString) : plainFileName(plainFileName) {
 
 		byte masterKeyBytes[KEYSIZE];
 
@@ -47,6 +47,8 @@ public:
 
 		AutoSeededRandomPool rng;
 		rng.GenerateBlock(iv, AES::BLOCKSIZE);
+		memset(iv, 0x01, AES::BLOCKSIZE);
+
 
 		filesystem::path cipherFilePath = outputDirPath / (cipherFileNameBase + getDataFileExtension());
 

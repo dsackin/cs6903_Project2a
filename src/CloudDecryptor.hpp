@@ -21,12 +21,12 @@ public:
 
 	~CloudDecryptor() {}
 
-	void DecryptFile(filesystem::path cipherFilePath, filesystem::path outputDirPath) {
+	filesystem::path DecryptFile(filesystem::path cipherFilePath, filesystem::path outputDirPath) {
 
 		byte iv[AES::BLOCKSIZE];
 		memset(iv, 0x01, AES::BLOCKSIZE);
 
-		unsigned short ivSize, plainFileNameSize;
+		unsigned short ivSize, plainFileNameSize = 0;
 
 		FileSource in(cipherFilePath.c_str(), false);
 
@@ -43,10 +43,16 @@ public:
 		in.Pump(2);
 		stf->GetWord16(plainFileNameSize);
 
+		if (plainFileNameSize > 255) {
+			cout << "Decryption failed. Check your key value for " << cipherFilePath.native() << endl;
+			exit(EXIT_FAILURE);
+		}
+
 		byte plainFileName[plainFileNameSize];
 		in.Pump(plainFileNameSize);
 		stf->Get(plainFileName, plainFileNameSize);
-		cout << plainFileName << endl;
+
+
 
 		string plainFileNameString((const char*)plainFileName);
 		filesystem::path resultFilePath = outputDirPath / plainFileNameString;
@@ -57,12 +63,18 @@ public:
 		if (filesystem::exists(resultFilePath)) {
 			filesystem::path outputFileName(plainFileNameString);
 			string currentExtension = outputFileName.extension().native();
-			outputFileName.replace_extension(filesystem::path(".decrypted." + currentExtension));
+			outputFileName.replace_extension(filesystem::path(".decrypted" + currentExtension));
 			resultFilePath = outputDirPath / outputFileName;
 		}
 
 		stf->Detach(new FileSink(resultFilePath.c_str()));
 		in.PumpAll();
+
+		cout << "Decryption Results" << endl;
+		cout << "Encrypted file : " << cipherFilePath.native() << endl;
+		cout << "Decrypted file : " << resultFilePath.native() << endl;
+
+		return resultFilePath;
 	}
 
 	static bool DecryptFile(string keyString, filesystem::path cipherFilePath, filesystem::path outputDirPath) {
@@ -72,7 +84,8 @@ public:
 		if ((keyString.length() == 2 * KEYSIZE) && IsHexString(keyString)) {
 			HexStringToBytes(keyString, symmetricKeyBytes, KEYSIZE);
 			CloudDecryptor decryptor(symmetricKeyBytes);
-			decryptor.DecryptFile(cipherFilePath, outputDirPath);
+			filesystem::path resultPath = decryptor.DecryptFile(cipherFilePath, outputDirPath);
+
 			return true;
 		}
 
@@ -80,7 +93,7 @@ public:
 	}
 
 protected:
-	CloudDecryptor(byte *symmetricKey) : symmetricKey(symmetricKey) {}
+	CloudDecryptor(byte *symmetricKey) : AbstractCloudCrypto(symmetricKey) { }
 
 };
 

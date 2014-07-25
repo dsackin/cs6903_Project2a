@@ -30,11 +30,13 @@ using namespace CryptoPP;
 #include "CloudDecryptor.hpp"
 
 // globals
-string usageMessage;
-string keyInput;
-filesystem::path inputFilePath;
-string filenameInput;
-filesystem::path outputDirPath;
+filesystem::path uninitializedPath = filesystem::path("UNINIT");
+
+string usageMessage = "";
+string keyInput = "";
+filesystem::path inputFilePath = uninitializedPath;
+string filenameInput = "";
+filesystem::path outputDirPath = uninitializedPath;
 
 map<string, string> parse_arguments(int argc, char **argv) {
 	po::options_description options("Cloud crypto commands");
@@ -121,9 +123,16 @@ bool ValidatePreprocessArguments(map<string, string> args) {
 		return false;
 
 	// interpret name (optional)
-	if (args.count("name"))
-		filenameInput = args["name"];
+	if (args.count("name")) {
+		filesystem::path namePath(args["name"]);
+		if (filesystem::exists(namePath))
+			FileSource in(namePath.c_str(), true, new StringSink(filenameInput));
+		else
+			filenameInput = args["name"];
+	}
 	else
+		// use the name from the input file
+		// inputFile is required so we know this exists
 		filenameInput = inputFilePath.filename().native();
 
 	// interpret outputDir as path to directory
@@ -161,18 +170,27 @@ bool ValidateAuthorizeArguments(map<string, string> args) {
 		inputFilePath = inputPath;
 
 	// interpret name (required if inputFile not specified)
-	if (args.count("name"))
-		filenameInput = args["name"];
-	else if (NULL != inputFilePath)
+	if (args.count("name")) {
+		// attempt to process as path to file containing name only
+		filesystem::path namePath(args["name"]);
+		if (filesystem::exists(namePath))
+			FileSource in(namePath.c_str(), true, new StringSink(filenameInput));
+		else {
+			// no file, just use the string as the name
+			filenameInput = args["name"];
+		}
+	} else if (uninitializedPath != inputFilePath)
+		// name arg not used, use name of input file, if provided
 		filenameInput = inputFilePath.filename().native();
 	else
+		// no resource for name (which is required). fail out.
 		return false;
 
 	// interpret outputDir as path to directory
 	filesystem::path outputPath(args["outputDir"]);
 	if (filesystem::exists(outputPath) && filesystem::is_directory(outputPath))
 		outputDirPath = outputPath;
-	else if (inputFilePath)
+	else if (uninitializedPath != inputFilePath)
 		// use directory of input file as output directory
 		outputDirPath = inputFilePath.parent_path();
 	else
@@ -208,10 +226,15 @@ bool ValidateRecoverArguments(map<string, string> args) {
 	if (filesystem::exists(inputPath) && filesystem::is_regular_file(inputPath))
 		inputFilePath = inputPath;
 
-	// interpret name (required if inputFile not specified)
-	if (args.count("name"))
-		filenameInput = args["name"];
-	else if (inputFilePath)
+	// interpret name - serves no purpose since name is in encrypted data
+	if (args.count("name")) {
+		// attempt to process as path to file containing name only
+		filesystem::path namePath(args["name"]);
+		if (filesystem::exists(namePath))
+			FileSource in(namePath.c_str(), true, new StringSink(filenameInput));
+		else
+			filenameInput = args["name"];
+	} else if (uninitializedPath != inputFilePath)
 		filenameInput = inputFilePath.filename().native();
 	else
 		return false;
@@ -220,7 +243,7 @@ bool ValidateRecoverArguments(map<string, string> args) {
 	filesystem::path outputPath(args["outputDir"]);
 	if (filesystem::exists(outputPath) && filesystem::is_directory(outputPath))
 		outputDirPath = outputPath;
-	else if (inputFilePath)
+	else if (uninitializedPath != inputFilePath)
 		// use directory of input file as output directory
 		outputDirPath = inputFilePath.parent_path();
 	else
@@ -279,50 +302,7 @@ int main(int argc, char **argv) {
 		Authorize(args);
 	else if (args["command"] == "recover")
 		Recover(args);
+	else
+		cout << usageMessage << endl;
 
-//
-//
-//	// process command line arguments
-//	processArguments(argc, argv, printUsage);
-//
-//	bool test = isHexString("1234");
-//	test = isHexString("abcd");
-//	test = isHexString("0");
-//	test = isHexString("no1234");
-//	test = isHexString("011b");
-//	test = isHexString("bd123no");
-//
-//
-//	string b = "a4c321";
-//	byte c[b.size()];
-//	int bytesProcessed  = AbstractCloudCrypto::HexStringToBytes(b, c, b.size() / 2);
-//
-//	b = "afdfsd";
-//	bytesProcessed = AbstractCloudCrypto::HexStringToBytes(b, c, b.size() / 2);
-//	 cout << "hello";
-//
-////
-////	filesystem::path outputPath("/home/doug/projects/cloud2/data");
-////
-////	filesystem::path in("/home/doug/projects/cloud2/data/test.in");
-////
-////
-////
-////
-////	CloudEncryptor enc("test.in", "this is my passphrase");
-////	enc.EncryptFile2(in);
-////
-////	filesystem::path keyFilePath = enc.SaveKeyToJsonFile(outputPath);
-////
-////	cout << keyFilePath.native() << "  " << enc.getSymmetricKeyAsHexString() << endl;
-////
-////	filesystem::path dataFilePath = outputPath / (enc.getCipherFileNameBase() + enc.getDataFileExtension());
-////	CloudDecryptor::DecryptFile(keyFilePath, dataFilePath);
-////
-//////	CloudDecryptor dec;
-//////	dec.InitializeFromKeyFile(keyFilePath);
-////
-//////	cout << keyFilePath.native() << "  " << dec.getSymmetricKeyAsHexString() << endl;
-//
-//
 }

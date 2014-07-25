@@ -89,6 +89,10 @@ protected:
 
 	AbstractCloudCrypto() {}
 
+	AbstractCloudCrypto(byte *symmetricKey) {
+		memcpy(this->symmetricKey, symmetricKey, KEYSIZE);
+	}
+
 };
 
 #endif /* ABSTRACTCLOUDCRYPTO_HPP_ */
