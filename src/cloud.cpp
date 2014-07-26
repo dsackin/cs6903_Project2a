@@ -1,8 +1,8 @@
-/*
- * preprocess.cpp
+/**
+ * cloud.cpp
  *
- *  Created on: Jul 19, 2014
- *      Author: doug
+ *  Created on: July 29, 2014
+ *      Author: Douglas Sackin, NYU CS6903, Summer 2014
  */
 
 #include <iostream>
@@ -106,7 +106,7 @@ public:
 
 		cout << "Encryption Results" << endl;
 		cout << "Plain file : " << plainFilePath.native() << endl;
-		cout << "Encrypted file : " << encryptedFilePath.native() << endl;
+		cout << "Encrypted file : " << encryptedFilePath.native() << endl << endl;
 
 	}
 
@@ -187,7 +187,7 @@ public:
 		cout << "Plain file : " << GetPlainFileName() << endl;
 		cout << "Encrypted file : " << GetEncryptedFileName() << endl;
 		cout << "Key file : " << keyFilePath << endl;
-		cout << "key value : " << keyHexString << endl;
+		cout << "key value : " << keyHexString << endl << endl;
 	}
 
 	filesystem::path DecryptFile(filesystem::path encryptedFilePath,
@@ -238,7 +238,7 @@ public:
 		cout << "Decryption Results" << endl;
 		cout << "Encrypted file : " << encryptedFilePath.native() << endl;
 		cout << "Decrypted file : " << resultFilePath.native() << endl;
-		cout << "Original file : " << plainFileName << endl;
+		cout << "Original file : " << plainFileName << endl << endl;
 
 		return resultFilePath;
 	}
@@ -375,7 +375,7 @@ public:
 //		cout << "Decryption Results" << endl;
 //		cout << "Encrypted file : " << encryptedFilePath.native() << endl;
 //		cout << "Decrypted file : " << resultFilePath.native() << endl;
-//		cout << "Original file : " << plainFileName << endl;
+//		cout << "Original file : " << plainFileName << endl << endl;
 //
 		return NULL;
 	}

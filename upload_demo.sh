@@ -1,7 +1,7 @@
 #!/bin/bash -x
 
 cd ~/projects/cloud2/demo
-openssl sha256 upload/*
+openssl md5 upload/*
 
 cat upload/small*
 
@@ -19,9 +19,7 @@ cat upload/small*
 
 ../bin/release/sackin-cloud.exe authorize -k upload/small_key.txt --inputFile="upload/small_file.txt" -o upload
 
-ls -l
-
-openssl sha256 upload/*
+openssl md5 upload/*
 
 ls -l download
 

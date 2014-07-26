@@ -4,11 +4,11 @@ cd ~/projects/cloud2/demo
 
 ls -l upload/*.enc.cld
 
-openssl sha256 upload/*.enc.cld
+openssl md5 upload/*.enc.cld
 
 ls -l download/*.enc.cld
 
-openssl sha256 download/*.enc.cld
+openssl md5 download/*.enc.cld
 
 cat upload/small*
 
@@ -19,8 +19,8 @@ cat download/fa8d-57aa-20fc-dbd9.key.cld
 
 ls -l upload/*.pdf upload/*.txt
 
-openssl sha256 upload/*.pdf upload/*.txt
+openssl md5 upload/*.pdf upload/*.txt
 
 ls -l download/*pdf download/*.txt
 
-openssl sha256 download/*.pdf download/*.txt
+openssl md5 download/*.pdf download/*.txt
