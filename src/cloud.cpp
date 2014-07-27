@@ -1,5 +1,56 @@
 /**
- * cloud.cpp
+ * This software is delivered in response to Project 2 for CS6903 in Summer 2014.
+ * It is a simple program that encrypts files for sharing with authorized users.
+ * One use case is to share the files over cloud file sharing services such as
+ * Dropbox and box.net.
+ *
+ * The encryption scheme uses a common master password or secret key from the
+ * sharer and combines this with information from each file to be encrypted
+ * to produce a unique symmetric encryption key for each shared file. The
+ * sharer then independently delivers this key to the recipients. The
+ * recipients use the per-file shared key to decrypt the files while not
+ * knowing the common secret key. In addition, the cloud file service provider
+ * and eavesdroppers have no knowledge of the file contents or even the file
+ * type.
+ *
+ * The utility uses HMAC<SHA256> to generate the unique 256 bit symmetric key
+ * which is used by AES in CTR mode for encryption. SHA256 is also used for key
+ * expansion and output file name generation.
+ *
+ * The utility also includes an implementation to support encryption with
+ * authentication/verification. However, this prototype implementation is not
+ * functioning due to runtime errors. the implementation uses GCM which is
+ * essentially AES with GMAC across encrypted data plus additional data (such
+ * as the IV header).
+ *
+ * The utility compiles to a single executable with three sub-commands. Each
+ * sub-command uses a common set of arguments to direct the utility to operate
+ * on the files. The utilities each allow a range of freedom in specifying the
+ * arguments (as detailed below).
+ *
+ * Cloud crypto commands:
+ *  -h [ --help ]          Cloud crypto options
+ *  --command arg          cloud crypto command to execute. One of preprocess,
+ *                         authorize, or recover
+ *  -k [ --key ] arg       Key value as hex string or path to key file containing
+ *                         key as 64 character hex string
+ *  -i [ --inputFile ] arg Path to input file
+ *  -n [ --name ] arg      Alternate name for input file (optional). If omitted,
+ *                         use name of input file.
+ *  -o [ --outputDir ] arg Path to output directory (optional). If omitted, use
+ *                         input directory.
+ *  -s [ --sign ]          Sign output for confidentiality with integrity
+ *  					   (work in progress)
+ *
+ *
+ * The following file formats are used in the program:
+ *   - plain input files - *.* - input files are in their native format
+ *   - encrypted files - *.enc.cld - encrypted files are in binary. To view in
+ *   	hex, use the appropriate options in your text editor.
+ *   - key files - *.key.cld - text, containing 64 hexadecimal digits
+ *   	representing 32 byte values
+ *   - decrypted files - *.dec.cld.* - decrypted files are in the original
+ *   	format of their plain input
  *
  *  Created on: July 29, 2014
  *      Author: Douglas Sackin, NYU CS6903, Summer 2014
@@ -33,12 +84,29 @@ using namespace CryptoPP;
 
 typedef unsigned char byte;
 
+/**
+ * CloudCrypto is the core class representing the use of a symmetric key to
+ * encrypt and decrypt a file.
+ *
+ * To encrypt a file, construct a CloudCrypto object using the name of the
+ * plain file and string containing the master key input. This will generate
+ * a unique symmetric key for that file. Then call EncryptFile() to encrypt
+ * and save it to a destination directory using a unique generated name.
+ *
+ * To export the key, construct a CloudCrypto object as above, then
+ * immediately call ExportKey() to save off the key for sharing.
+ *
+ * To decrypt the file, call the static DecryptFile() function. This will
+ * construct a CloudCrypto from the key input, then decrypt and save the
+ * contents of the input file.
+ */
 class CloudCrypto {
 
 protected:
 	static const unsigned int KEYSIZE = SHA256::DIGESTSIZE;
 	static const unsigned int TAGSIZE = 16;
 
+	// used to validate decryption success. Equivalent to 0xAB 0xCD
 	static const unsigned short KEYTEST = 43981;
 
 	byte symmetricKey[KEYSIZE];
@@ -54,6 +122,15 @@ protected:
 
 public:
 
+	/**
+	 * Construct an instance using a file name and the master key input
+	 * as a string. If the key input can be interpreted as a 64 character
+	 * hex string, it is converted to 32 bytes of input and used directly
+	 * as the data. Otherwise, the string is considered a master password
+	 * and is hashed with SHA256 to expand it to 256 bits. Once the master
+	 * key has 256 bits of input, a per-file symmetric key is derived using
+	 * HMAC<SHA256> of the filename.
+	 */
 	CloudCrypto(const string plainFileName, const string masterKeyString) :
 			plainFileName(plainFileName) {
 
@@ -73,9 +150,18 @@ public:
 		DeriveEncryptedFileNameBase();
 	}
 
+	/**
+	 * Default destructor
+	 */
 	~CloudCrypto() {
 	}
 
+	/**
+	 * Encrypt file using AES in CTR mode with saved symmetric key. Take file
+	 * input from plainFilePath and write it to outputDirPath using the
+	 * obfuscated file name. The IV is serialized into the file in the clear.
+	 * The original file name is also serialized in the encrypted text.
+	 */
 	void EncryptFile(filesystem::path plainFilePath,
 			filesystem::path outputDirPath) {
 
@@ -110,71 +196,86 @@ public:
 
 	}
 
+	/**
+	 * Encrypt and sign file using GCM with AES with saved symmetric key. Take
+	 * file input from plainFilePath and write it to outputDirPath using the
+	 * obfuscated file name. The IV is serialized into the file in the clear.
+	 * The original file name is also serialized in the encrypted text. All
+	 * data is signed while only the name and data are encrypted.
+	 *
+	 * THIS IS WORK IN PROGRESS
+	 *
+	 */
 	void EncryptAndSignFile(filesystem::path plainFilePath,
 			filesystem::path outputDirPath) {
 
-		cout << "ERROR: Encryption with authentication not implemented" << endl;
+		cerr << "ERROR: Encryption with authentication not implemented" << endl;
 
-//		byte iv[AES::BLOCKSIZE];
-//
-//		AutoSeededRandomPool rng;
-////		rng.GenerateBlock(iv, AES::BLOCKSIZE);
-//		memset(iv, 0x01, sizeof(iv));
-//
-//
-//		filesystem::path encryptedFilePath = outputDirPath / GetEncryptedFileName(true);
-//
-//		try {
-//			GCM<AES>::Encryption gcm_aes_enc;
-//			gcm_aes_enc.SetKeyWithIV(GetSymmetricKey(), KEYSIZE, iv, sizeof(iv));
-//
-//			AuthenticatedEncryptionFilter ef(gcm_aes_enc,
-//					new FileSink(encryptedFilePath.c_str()),
-//					false,
-//					TAGSIZE		// tag size
-//					/* MAC_AT_END */
-//					); // AuthenticatedEncryptionFilter
-//
-//			// write the iv to the authenticated but not encrypted channel
-//			ef.ChannelPut(AAD_CHANNEL, iv, sizeof(iv));
-//			ef.ChannelMessageEnd(AAD_CHANNEL);
-//
-//			// Authenticated data *must* be pushed before
-//			//  Confidential/Authenticated data. Otherwise
-//			//  we must catch the BadState exception
-//			ef.ChannelPutWord16(DEFAULT_CHANNEL, KEYTEST);
-//
-//			string plainFileName = plainFilePath.filename().native();
-//			unsigned short plainFileNameSize = plainFileName.size() + 1;
-//
-//			ef.ChannelPutWord16(DEFAULT_CHANNEL, plainFileNameSize);
-//			ef.ChannelPut(DEFAULT_CHANNEL, (byte*) plainFileName.c_str(),
-//					plainFileNameSize);
-//
-////			MessageQueue queue(AES::BLOCKSIZE);
-//			byte bytes[AES::BLOCKSIZE];
-//
-//			FileSource in(plainFilePath.c_str(), false);
-////			in.Attach(new Redirector(ef));
-////			in.PumpAll();
-//
+		byte iv[AES::BLOCKSIZE];
+
+		AutoSeededRandomPool rng;
+//		rng.GenerateBlock(iv, AES::BLOCKSIZE);
+		memset(iv, 0x01, sizeof(iv));
+
+
+		filesystem::path encryptedFilePath = outputDirPath / GetEncryptedFileName(true);
+
+		try {
+			GCM<AES>::Encryption gcm_aes_enc;
+			gcm_aes_enc.SetKeyWithIV(GetSymmetricKey(), KEYSIZE, iv, sizeof(iv));
+
+			AuthenticatedEncryptionFilter ef(gcm_aes_enc,
+					new FileSink(encryptedFilePath.c_str()),
+					false,
+					TAGSIZE		// tag size
+					/* MAC_AT_END */
+					); // AuthenticatedEncryptionFilter
+
+			// write the iv to the authenticated but not encrypted channel
+			ef.ChannelPut(AAD_CHANNEL, iv, sizeof(iv));
+			ef.ChannelMessageEnd(AAD_CHANNEL);
+
+			// Authenticated data *must* be pushed before
+			//  Confidential/Authenticated data. Otherwise
+			//  we must catch the BadState exception
+			ef.ChannelPutWord16(DEFAULT_CHANNEL, KEYTEST);
+
+			string plainFileName = plainFilePath.filename().native();
+			unsigned short plainFileNameSize = plainFileName.size() + 1;
+
+			ef.ChannelPutWord16(DEFAULT_CHANNEL, plainFileNameSize);
+			ef.ChannelPut(DEFAULT_CHANNEL, (byte*) plainFileName.c_str(),
+					plainFileNameSize);
+
+//			MessageQueue queue(AES::BLOCKSIZE);
+			byte bytes[AES::BLOCKSIZE];
+
+			FileSource in(plainFilePath.c_str(), false);
+			in.Attach(new Redirector(ef));
+			in.PumpAll();
+
 //			while (in.AnyRetrievable()) {
 //				unsigned short bytesRetrieved = in.Get(bytes, sizeof(bytes));
 //				ef.ChannelPut(DEFAULT_CHANNEL, bytes, bytesRetrieved);
 //			}
-//			ef.ChannelMessageEnd(DEFAULT_CHANNEL);
-//
-//			cout << "Encryption Results" << endl;
-//			cout << "Plain file : " << plainFilePath.native() << endl;
-//			cout << "Encrypted and Signed file : " << encryptedFilePath.native() << endl;
-//
-//		} catch (CryptoPP::Exception& e) {
-//			cerr << "Caught Exception..." << endl;
-//			cerr << e.what() << endl;
-//			cerr << endl;
-//		}
+			ef.ChannelMessageEnd(DEFAULT_CHANNEL);
+
+			cout << "Encryption Results" << endl;
+			cout << "Plain file : " << plainFilePath.native() << endl;
+			cout << "Encrypted and Signed file : " << encryptedFilePath.native() << endl;
+
+		} catch (CryptoPP::Exception& e) {
+		    cerr << "ERROR: Unable to encrypt and sign: " << plainFilePath << endl;
+		    cerr << e.what() << endl << endl;
+		}
 	}
 
+	/**
+	 * Export the unique symmetric key for a file. Keys are written to the
+	 * output directory as a text file of 64 hex characters (representing 32
+	 * bytes). They are also written to stdout. Either is acceptable input for
+	 * decrypting a file.
+	 */
 	void ExportKey(filesystem::path outputDirPath) {
 
 		string keyHexString = GetSymmetricKeyAsHexString();
@@ -190,6 +291,14 @@ public:
 		cout << "key value : " << keyHexString << endl << endl;
 	}
 
+	/**
+	 * Decrypt a file using the symmetric key stored in this CloudCrypto object.
+	 * Take the file at the encrypted file path and attempt to decrypt it
+	 * using the saved symmetric key. Read the IV from the file, then use this
+	 * to decrypt the data. The data has a test value and then the file name
+	 * length and value prepended. Write the contents to the output directory.
+	 * If the file cannot be decrypted (usually the wrong key), report and exit.
+	 */
 	filesystem::path DecryptFile(filesystem::path encryptedFilePath,
 			filesystem::path outputDirPath) {
 
@@ -243,143 +352,111 @@ public:
 		return resultFilePath;
 	}
 
+	/**
+	 * Decrypt and verify a file using the symmetric key stored in this
+	 * CloudCrypto object. Take the file at the encrypted file path and
+	 * attempt to decrypt and verify it using the saved symmetric key.
+	 * Write the contents to the output directory. If the file cannot be
+	 * verified or decrypted (usually the wrong key), report and exit.
+	 *
+	 * THIS IS WORK IN PROGRES
+	 *
+	 */
 	filesystem::path DecryptAndAuthenticateFile(filesystem::path encryptedFilePath,
 			filesystem::path outputDirPath) {
 
-		cout << "ERROR: Decryption with authentication not implemented" << endl;
+		cerr << "ERROR: Decryption with authentication not implemented" << endl;
 
-//		byte iv[AES::BLOCKSIZE];
-//		memset(iv, 0x01, AES::BLOCKSIZE);
-//
-//		unsigned short ivSize = 0;
-//
-//		FileSource in(encryptedFilePath.c_str(), false);
-//
-//		// retrieve IV size
-//		in.Pump(2);
-//		in.GetWord16(ivSize);
-//
-//		// retrieve IV bytes
-//		in.Pump(ivSize);
-//		in.Get(iv, ivSize);
-//
-//		byte adata[ivSize+2];
-//		istream is = in.GetStream();
-//		is.read((char*)adata, sizeof(adata));
-//
-//		try
-//		{
-//		    GCM< AES >::Decryption decryptor;
-//		    decryptor.SetKeyWithIV(GetSymmetricKey(), KEYSIZE, iv, sizeof(iv));
-//
-//
-//		    AuthenticatedDecryptionFilter df(decryptor, NULL, AuthenticatedDecryptionFilter::MAC_AT_END, TAGSIZE);
-//
-//		    df.ChannelPut( AAD_CHANNEL, adata, sizeof(adata));
-//
+		byte iv[AES::BLOCKSIZE];
+		memset(iv, 0x01, AES::BLOCKSIZE);
+
+		unsigned short ivSize = 0;
+
+		FileSource in(encryptedFilePath.c_str(), false);
+
+		// retrieve IV size
+		in.Pump(2);
+		in.GetWord16(ivSize);
+
+		// retrieve IV bytes
+		in.Pump(ivSize);
+		in.Get(iv, ivSize);
+
+		byte unencrypted[ivSize+2];
+		istream *is = in.GetStream();
+		is->read((char*)unencrypted, sizeof(unencrypted));
+
+		try
+		{
+		    GCM< AES >::Decryption decryptor;
+		    decryptor.SetKeyWithIV(GetSymmetricKey(), KEYSIZE, iv, sizeof(iv));
+
+
+		    AuthenticatedDecryptionFilter df(decryptor, NULL, AuthenticatedDecryptionFilter::MAC_AT_END, TAGSIZE);
+
+		    df.ChannelPut( AAD_CHANNEL, unencrypted, sizeof(unencrypted));
+
+		    in.Attach(new Redirector(df));
+		    in.PumpAll();
+
 //		    byte bytes[AES::BLOCKSIZE];
 //			while (in.MaxRetrievable() > 0) {
 //				in.Pump(sizeof(bytes));
 //				unsigned short bytesRetrieved = in.Get(bytes, sizeof(bytes));
 //				df.ChannelPut(DEFAULT_CHANNEL, bytes, bytesRetrieved);
 //			}
-//			df.MessageEnd();
-//
-//		    // If the object does not throw, here's the only
-//		    //  opportunity to check the data's integrity
-//		    bool verified = df.GetLastResult();
-//
-//		    if (!verified) {
-//		    	cout << "ERROR: input file failed to verify: " << encryptedFilePath.native() << endl << endl;
-//		    	exit(EXIT_FAILURE);
-//		    }
-//
-//
-//		    // Remove data from channel
-//		    string retrieved;
-//		    size_t n = (size_t)-1;
-//
-//		    // Plain text recovered from enc.data()
-//		    df.SetRetrievalChannel( DEFAULT_CHANNEL );
-//		    n = (size_t)df.MaxRetrievable();
-//		    retrieved.resize( n );
-//
-//		    if( n > 0 ) { df.Get( (byte*)retrieved.data(), n ); }
-//		    rpdata = retrieved;
-//		    assert( rpdata == pdata );
-//
-//		    // All is well - work with data
-//		    cout << "Decrypted and Verified data. Ready for use." << endl;
-//		    cout << endl;
-//
-//		    cout << "adata length: " << adata.size() << endl;
-//		    cout << "pdata length: " << pdata.size() << endl;
-//		    cout << endl;
-//
-//		    cout << "recovered adata length: " << radata.size() << endl;
-//		    cout << "recovered pdata length: " << rpdata.size() << endl;
-//		    cout << endl;
-//		}
-//		catch( CryptoPP::Exception& e )
-//		{
-//		    cerr << "Caught Exception..." << endl;
-//		    cerr << e.what() << endl;
-//		    cerr << endl;
-//		}
-//
-//
-//
-//
-//
-//
-//
-//
-//
-//
-//		in.Pump(2);
-//		in.GetWord16(ivSize);
-//
-//		in.Pump(ivSize);
-//		in.Get(iv, ivSize);
-//
-//		CTR_Mode<AES>::Decryption aes_ctr_dec(GetSymmetricKey(), KEYSIZE, iv);
-//		StreamTransformationFilter *stf = new StreamTransformationFilter(
-//				aes_ctr_dec);
-//		in.Attach(stf);
-//
-//		unsigned short keyTest = 0;
-//		in.Pump(2);
-//		stf->GetWord16(keyTest);
-//
-//		if (keyTest != KEYTEST) {
-//			cout << "Decryption failed. Check your key value for "
-//					<< encryptedFilePath.native() << endl;
-//			exit(EXIT_FAILURE);
-//		}
-//
-//		unsigned short plainFileNameSize = 0;
-//		in.Pump(2);
-//		stf->GetWord16(plainFileNameSize);
-//
-//		byte plainFileNameBytes[plainFileNameSize];
-//		in.Pump(plainFileNameSize);
-//		stf->Get(plainFileNameBytes, plainFileNameSize);
-//
-//		plainFileName = string((const char*) plainFileNameBytes);
-//		filesystem::path resultFilePath = outputDirPath
-//				/ GetDecryptedFileName();
-//
-//		stf->Detach(new FileSink(resultFilePath.c_str()));
-//		in.PumpAll();
-//
-//		cout << "Decryption Results" << endl;
-//		cout << "Encrypted file : " << encryptedFilePath.native() << endl;
-//		cout << "Decrypted file : " << resultFilePath.native() << endl;
-//		cout << "Original file : " << plainFileName << endl << endl;
-//
-		return NULL;
+			df.MessageEnd();
+
+		    // If the object does not throw, here's the only
+		    //  opportunity to check the data's integrity
+		    bool verified = df.GetLastResult();
+
+		    if (!verified) {
+		    	cerr << "ERROR: input file failed to verify: " << encryptedFilePath.native() << endl << endl;
+		    	exit(EXIT_FAILURE);
+		    }
+
+		    df.SetRetrievalChannel(DEFAULT_CHANNEL);
+
+			unsigned short keyTest = 0;
+			df.GetWord16(keyTest);
+
+			if (keyTest != KEYTEST) {
+				cout << "Decryption failed. Check your key value for "
+						<< encryptedFilePath.native() << endl;
+				exit(EXIT_FAILURE);
+			}
+
+			unsigned short plainFileNameSize = 0;
+			df.GetWord16(plainFileNameSize);
+
+			byte plainFileNameBytes[plainFileNameSize];
+			df.Get(plainFileNameBytes, plainFileNameSize);
+
+			plainFileName = string((const char*) plainFileNameBytes);
+			filesystem::path resultFilePath = outputDirPath / GetDecryptedFileName();
+
+			df.Detach(new FileSink(resultFilePath.c_str()));
+
+			cout << "Decryption Results" << endl;
+			cout << "Encrypted file : " << encryptedFilePath.native() << endl;
+			cout << "Decrypted file : " << resultFilePath.native() << endl;
+			cout << "Original file : " << plainFileName << endl << endl;
+
+			return resultFilePath;
+		}
+		catch( CryptoPP::Exception& e )
+		{
+		    cerr << "ERROR: Unable to decrypt and verify: " << encryptedFilePath << endl;
+		    cerr << e.what() << endl << endl;
+		}
 	}
 
+	/**
+	 * Static method to construct a CloudCrypto object using the provided key
+	 * input, then proceed with decryption by called the CloudCrypto object's
+	 * DecryptFile method.
+	 */
 	static bool DecryptFile(string keyString,
 			filesystem::path encryptedFilePath, filesystem::path outputDirPath, bool authenticate,
 			string encryptedFileName = "") {
@@ -481,6 +558,10 @@ protected:
 		}
 	}
 
+	/**
+	 * Use HMAC<SHA256> to derive the symmetric key from the master key and
+	 * the specified input file name
+	 */
 	void DeriveSymmetricKey(const string plainFileName,
 			const byte *masterKeyBytes, unsigned int masterKeyLength) {
 
@@ -489,6 +570,10 @@ protected:
 				plainFileName.size());
 	}
 
+	/**
+	 * Derive an obfuscated output name from the hash of the specified
+	 * input file name.
+	 */
 	void DeriveEncryptedFileNameBase() {
 
 		byte nameHash[KEYSIZE];
@@ -579,7 +664,7 @@ map<string, string> parse_arguments(int argc, char **argv) {
  */
 bool ValidatePreprocessArguments(map<string, string> args) {
 	if (!(args.count("key") && args.count("inputFile"))) {
-		cout << "ERROR: Key and input file are required arguments to 'preprocess'" << endl << endl;
+		cerr << "ERROR: Key and input file are required arguments to 'preprocess'" << endl << endl;
 		return false;
 	}
 
@@ -596,7 +681,7 @@ bool ValidatePreprocessArguments(map<string, string> args) {
 	if (filesystem::exists(inputPath) && filesystem::is_regular_file(inputPath))
 		inputFilePath = inputPath;
 	else {
-		cout << "ERROR: Input file not found: " << inputPath.native() << endl << endl;
+		cerr << "ERROR: Input file not found: " << inputPath.native() << endl << endl;
 		return false;
 	}
 
@@ -633,7 +718,7 @@ bool ValidatePreprocessArguments(map<string, string> args) {
  */
 bool ValidateAuthorizeArguments(map<string, string> args) {
 	if (!(args.count("key") && (args.count("name") || args.count("inputFile")))) {
-		cout << "ERROR: Key and input file or input file name are required arguments to 'authorize'" << endl << endl;
+		cerr << "ERROR: Key and input file or input file name are required arguments to 'authorize'" << endl << endl;
 		return false;
 	}
 
@@ -665,7 +750,7 @@ bool ValidateAuthorizeArguments(map<string, string> args) {
 		filenameInput = inputFilePath.filename().native();
 	else {
 		// no resource for name (which is required). fail out.
-		cout << "ERROR: Unable to determine name for encrypted file." << endl << endl;
+		cerr << "ERROR: Unable to determine name for encrypted file." << endl << endl;
 		return false;
 	}
 
@@ -692,7 +777,7 @@ bool ValidateAuthorizeArguments(map<string, string> args) {
  */
 bool ValidateRecoverArguments(map<string, string> args) {
 	if (!(args.count("key") && args.count("inputFile"))) {
-		cout << "ERROR: Key and input file are required arguments to 'recover'" << endl << endl;
+		cerr << "ERROR: Key and input file are required arguments to 'recover'" << endl << endl;
 		return false;
 	}
 
@@ -706,7 +791,7 @@ bool ValidateRecoverArguments(map<string, string> args) {
 
 	// for this command, key must be bytes as a hex string
 	if (!CloudCrypto::IsHexString(keyInput)) {
-		cout << "ERROR: Key value provided was not parseable as 32 bytes in hex representation." << endl << endl;
+		cerr << "ERROR: Key value provided was not parseable as 32 bytes in hex representation." << endl << endl;
 		return false;
 	}
 
@@ -715,7 +800,7 @@ bool ValidateRecoverArguments(map<string, string> args) {
 	if (filesystem::exists(inputPath) && filesystem::is_regular_file(inputPath))
 		inputFilePath = inputPath;
 	else {
-		cout << "ERROR: Input file not found: " << inputPath.native() << endl << endl;
+		cerr << "ERROR: Input file not found: " << inputPath.native() << endl << endl;
 		return false;
 	}
 
@@ -730,7 +815,7 @@ bool ValidateRecoverArguments(map<string, string> args) {
 	} else if (!inputFilePath.empty())
 		filenameInput = inputFilePath.filename().native();
 	else {
-		cout << "ERROR: Unable to set name of encrypted file" << endl << endl;
+		cerr << "ERROR: Unable to set name of encrypted file" << endl << endl;
 		return false;
 	}
 
@@ -761,7 +846,7 @@ void Preprocess(map<string, string> args) {
 	CloudCrypto encryptor(filenameInput, keyInput);
 
 	if (signFlag) {
-		cout << "ERROR: Encryption with authentication not implemented" << endl;
+		cerr << "ERROR: Encryption with authentication not implemented" << endl;
 		//encryptor.EncryptAndSignFile(inputFilePath, outputDirPath);
 	} else
 		encryptor.EncryptFile(inputFilePath, outputDirPath);
@@ -787,12 +872,7 @@ void Recover(map<string, string> args) {
 }
 
 /**
- * Main program to execute the decrypt functionality using a provided cipher
- * text and plain text dictionary.
- *
- * @param argc - count of arguments
- * @param argv - array of c-style strings
- * @return
+ * Main program to execute the cloud crypto functionality
  */
 int main(int argc, char **argv) {
 
